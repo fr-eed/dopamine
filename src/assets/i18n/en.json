@@ -251,5 +251,6 @@
     "lrc-lyrics": "LRC lyrics",
     "online-lyrics": "Online lyrics",
     "mute": "Mute",
-    "unmute": "Unmute"
+    "unmute": "Unmute",
+    "switch-player": "Switch player"
 }
