@@ -357,6 +357,7 @@ try {
             if (mainWindow) {
                 // On Mac, the path of a double-clicked file is not passed as argument. Instead, it is passed as open-file event.
                 // https://stackoverflow.com/questions/50935292/argv1-returns-unexpected-value-when-i-open-a-file-on-double-click-in-electron
+                event.preventDefault();
                 mainWindow.webContents.send('arguments-received', path);
             }
         });
