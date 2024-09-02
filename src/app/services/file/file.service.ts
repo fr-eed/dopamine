@@ -58,7 +58,7 @@ export class FileService implements FileServiceBase {
 
     private hasPlayableFilesAsGivenParameters(parameters: string[]): boolean {
         const safeParameters: string[] = this.getSafeParameters(parameters);
-        this.logger.info(`Found parameters: ${safeParameters.join(', ')}`, 'FileService', 'hasPlayableFilesAsParameters');
+        this.logger.info(`Found parameters: ${safeParameters.join(', ')}`, 'FileService', 'hasPlayableFilesAsGivenParameters');
 
         for (const safeParameter of safeParameters) {
             if (this.fileValidator.isPlayableAudioFile(safeParameter)) {

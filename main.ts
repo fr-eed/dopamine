@@ -353,6 +353,14 @@ try {
             }
         });
 
+        app.on('open-file', (event, path) => {
+            if (mainWindow) {
+                // On Mac, the path of a double-clicked file is not passed as argument. Instead, it is passed as open-file event.
+                // https://stackoverflow.com/questions/50935292/argv1-returns-unexpected-value-when-i-open-a-file-on-double-click-in-electron
+                mainWindow.webContents.send('arguments-received', path);
+            }
+        });
+
         // This method will be called when Electron has finished
         // initialization and is ready to create browser windows.
         // Some APIs can only be used after this event occurs.
