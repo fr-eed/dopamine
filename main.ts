@@ -11,7 +11,6 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeTheme, protocol, Tray } from 'electron';
 import log from 'electron-log';
 import * as Store from 'electron-store';
-import * as os from 'os';
 import * as path from 'path';
 import * as url from 'url';
 import { Worker } from 'worker_threads';
@@ -40,11 +39,17 @@ let mainWindow: BrowserWindow | undefined;
 let tray: Tray;
 let isQuitting: boolean;
 let isQuit: boolean;
+let fileProcessingTimeout: NodeJS.Timeout;
 
 // Static folder is not detected correctly in production
 if (process.env.NODE_ENV !== 'development') {
     globalAny.__static = require('path').join(__dirname, '/static').replace(/\\/g, '\\\\');
 }
+
+// Static variables
+globalAny.windowHasFrame = windowHasFrame();
+globalAny.isMacOS = isMacOS();
+globalAny.fileQueue = [];
 
 /**
  * Functions
@@ -71,12 +76,20 @@ function windowHasFrame(): boolean {
     return settings.get('useSystemTitleBar');
 }
 
+function isMacOS(): boolean {
+    return process.platform === 'darwin';
+}
+
+function isWindows(): boolean {
+    return process.platform === 'win32';
+}
+
 function titleBarStyle(): 'hiddenInset' | 'default' {
     if (settings.get('useSystemTitleBar')) {
         return 'default';
     }
     // makes traffic lights visible on macOS
-    if (process.platform === 'darwin') {
+    if (isMacOS()) {
         return 'hiddenInset';
     }
     return 'default';
@@ -107,13 +120,13 @@ function shouldCloseToNotificationArea(): boolean {
 }
 
 function getTrayIcon(): string {
-    if (os.platform() === 'darwin') {
+    if (isMacOS()) {
         return path.join(globalAny.__static, 'icons/trayTemplate.png');
     }
 
     const invertColor: boolean = settings.get('invertNotificationAreaIconColor');
 
-    if (os.platform() === 'win32') {
+    if (isWindows()) {
         if (!invertColor) {
             // Defaulting to black for Windows
             return path.join(globalAny.__static, 'icons/tray_black.ico');
@@ -157,7 +170,13 @@ function setInitialWindowState(mainWindow: BrowserWindow): void {
             mainWindow.resizable = false;
             mainWindow.maximizable = false;
             mainWindow.setContentSize(windowPositionSizeMaximized[2], windowPositionSizeMaximized[3]);
+            if (isMacOS()) {
+                mainWindow.fullScreenable = false;
+            }
         } else {
+            if (isMacOS()) {
+                mainWindow.fullScreenable = true;
+            }
             mainWindow.setSize(windowPositionSizeMaximized[2], windowPositionSizeMaximized[3]);
             if (windowPositionSizeMaximized[4] === 1) {
                 mainWindow.maximize();
@@ -188,8 +207,8 @@ function createMainWindow(): void {
         backgroundColor: '#fff',
         frame: windowHasFrame(),
         titleBarStyle: titleBarStyle(),
-        trafficLightPosition: process.platform === 'darwin' ? { x: 10, y: 15 } : undefined,
-        icon: path.join(globalAny.__static, os.platform() === 'win32' ? 'icons/icon.ico' : 'icons/64x64.png'),
+        trafficLightPosition: isMacOS() ? { x: 10, y: 15 } : undefined,
+        icon: path.join(globalAny.__static, isWindows() ? 'icons/icon.ico' : 'icons/64x64.png'),
         webPreferences: {
             webSecurity: false,
             nodeIntegration: true,
@@ -201,8 +220,6 @@ function createMainWindow(): void {
     setInitialWindowState(mainWindow);
 
     remoteMain.enable(mainWindow.webContents);
-
-    globalAny.windowHasFrame = windowHasFrame();
 
     if (isServing) {
         require('electron-reload')(__dirname, {
@@ -276,7 +293,7 @@ function createMainWindow(): void {
                     isQuitting = true;
                 }
                 // on MacOS, close button never closed entire app
-                else if (process.platform === 'darwin') {
+                else if (isMacOS()) {
                     mainWindow.hide();
                 } else if (shouldCloseToNotificationArea()) {
                     mainWindow.hide();
@@ -346,7 +363,56 @@ function createMainWindow(): void {
             }
         }
     });
+
+    mainWindow.on('leave-full-screen', () => {
+        if (!mainWindow) {
+            return;
+        }
+        // On macOS, fullscreen transitions takes time
+        // So, we need to wait for the leave-full-screen to finally resize the window
+        if (!isMacOS()) {
+            return;
+        }
+
+        // if mode is not cover anymore, return
+        if (settings.get('playerType') !== 'cover') {
+            return;
+        }
+
+        setCoverPlayer(mainWindow);
+    });
 }
+
+function setCoverPlayer(mainWindow: BrowserWindow): void {
+    const coverPlayerPositionAsString: string = settings.get('coverPlayerPosition');
+    const coverPlayerPosition: number[] = coverPlayerPositionAsString.split(';').map(Number);
+
+    if (isMacOS()) {
+        mainWindow.fullScreenable = false;
+    }
+    mainWindow.resizable = false;
+    mainWindow.maximizable = false;
+    mainWindow.setPosition(coverPlayerPosition[0], coverPlayerPosition[1]);
+    mainWindow.setContentSize(350, 430);
+}
+
+function pushFilesToQueue(files: string[], functionName: string): void {
+    globalAny.fileQueue.push(...files);
+    log.info(`[App] [${functionName}] File queue: ${globalAny.fileQueue}`);
+    clearTimeout(fileProcessingTimeout);
+    fileProcessingTimeout = setTimeout(processFileQueue, debounceDelay);
+}
+
+function processFileQueue(): void {
+    if (globalAny.fileQueue.length > 0) {
+        log.info(`[App] [processFileQueue] Processing files: ${globalAny.fileQueue}`);
+        if (mainWindow) {
+            mainWindow.webContents.send('arguments-received', globalAny.fileQueue);
+        }
+    }
+}
+
+const debounceDelay: number = 100;
 
 /**
  * Main
@@ -358,14 +424,15 @@ try {
 
     if (!gotTheLock) {
         log.info('[Main] [Main] There is already another instance running. Closing.');
+        // Quit second instance
         app.quit();
     } else {
         app.on('second-instance', (event, argv, workingDirectory) => {
-            log.info('[Main] [Main] Attempt to run second instance. Showing existing window.');
+            // First instance gets the arguments of the second instance and processes them
+            log.info('[App] [second-instance] Attempt to run second instance. Showing existing window.');
+            pushFilesToQueue(argv, 'second-instance');
 
             if (mainWindow) {
-                mainWindow.webContents.send('arguments-received', argv);
-
                 // Someone tried to run a second instance, we should focus the existing window.
                 if (mainWindow.isMinimized()) {
                     mainWindow.restore();
@@ -385,20 +452,20 @@ try {
             log.info('[App] [window-all-closed] +++ Stopping +++');
             // On OS X it is common for applications and their menu bar
             // to stay active until the user quits explicitly with Cmd + Q
-            if (process.platform !== 'darwin') {
+            if (!isMacOS()) {
                 app.quit();
             }
         });
 
         app.on('activate', () => {
-            // On OS X it's common to re-create a window in the app when the
+            // On macOS, it's common to re-create a window in the app when the
             // dock icon is clicked and there are no other windows open.
             if (mainWindow == undefined) {
                 createMainWindow();
             }
 
-            // on MacOS, clicking the dock icon should show the window
-            if (process.platform === 'darwin') {
+            // On macOS, clicking the dock icon should show the window.
+            if (isMacOS()) {
                 if (mainWindow) {
                     mainWindow.show();
                     mainWindow.focus();
@@ -421,6 +488,14 @@ try {
                 tray = new Tray(getTrayIcon());
                 tray.setToolTip('Dopamine');
             }
+        });
+
+        app.on('open-file', (event, path) => {
+            log.info(`[App] [open-file] File opened: ${path}`);
+            // On macOS, the path of a double-clicked file is not passed as argument. Instead, it is passed as open-file event.
+            // https://stackoverflow.com/questions/50935292/argv1-returns-unexpected-value-when-i-open-a-file-on-double-click-in-electron
+            event.preventDefault();
+            pushFilesToQueue([path], 'open-file');
         });
 
         nativeTheme.on('updated', () => {
@@ -488,12 +563,15 @@ try {
         });
 
         ipcMain.on('set-full-player', (event: any, arg: any) => {
-            settings.set('playerType', 'full');
+            log.info('[Main] [set-full-player] Setting playerType to full player');
             if (mainWindow) {
                 const fullPlayerPositionSizeMaximizedAsString: string = settings.get('fullPlayerPositionSizeMaximized');
                 console.log(fullPlayerPositionSizeMaximizedAsString);
                 const fullPlayerPositionSizeMaximized: number[] = fullPlayerPositionSizeMaximizedAsString.split(';').map(Number);
 
+                if (isMacOS()) {
+                    mainWindow.fullScreenable = true;
+                }
                 mainWindow.resizable = true;
                 mainWindow.maximizable = true;
                 mainWindow.setPosition(fullPlayerPositionSizeMaximized[0], fullPlayerPositionSizeMaximized[1]);
@@ -506,17 +584,25 @@ try {
         });
 
         ipcMain.on('set-cover-player', (event: any, arg: any) => {
-            settings.set('playerType', 'cover');
+            log.info('[Main] [set-cover-player] Setting playerType to cover player');
             if (mainWindow) {
-                const coverPlayerPositionAsString: string = settings.get('coverPlayerPosition');
-                const coverPlayerPosition: number[] = coverPlayerPositionAsString.split(';').map(Number);
+                // We cannot resize the window when it is still in full screen mode on macOS.
+                if (isMacOS() && mainWindow.isFullScreen()) {
+                    // If for whatever reason fullScreenable will be set to false
+                    // mainWindow.fullScreen = false; will not work on macOS.
+                    mainWindow.fullScreenable = true;
+                    mainWindow.fullScreen = false;
+                    return;
+                }
 
                 mainWindow.unmaximize();
-                mainWindow.resizable = false;
-                mainWindow.maximizable = false;
-                mainWindow.setPosition(coverPlayerPosition[0], coverPlayerPosition[1]);
-                mainWindow.setContentSize(350, 430);
+                setCoverPlayer(mainWindow);
             }
+        });
+
+        ipcMain.on('clear-file-queue', (event: any, arg: any) => {
+            log.info('[Main] [clear-file-queue] Clearing file queue');
+            globalAny.fileQueue = [];
         });
     }
 } catch (e) {

@@ -3,11 +3,34 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.0-preview.34] - 2024-09-14
+## [3.0.0-preview.36] - 2024-10-21
+
+### Changed
+
+-   Updated Vietnamese translation
+
+## [3.0.0-preview.35] - 2024-10-20
+
+### Added
+
+-   Added gapless playback
+-   Added back support for .tiff cover images after having to break it in order to fix other problems
+-   Added Italian translation
+
+### Fixed
+
+-   Fixed missing tray icons on all operating systems
+-   Fixed slow performance on folders screen when opening folders containing a lot of files
+-   Fixed sorting of songs by album when there are more than 9 songs in a multi-disc album
+-   Fixed albums being shown under the wrong artist due to splitting of artists on separators
+-   Fixed problems while transitioning between full and cover player on macOS
+
+## [3.0.0-preview.34] - 2024-09-21
 
 ### Added
 
 -   Adds a new macOS icon (Thank you https://github.com/VisualisationExpo)
+-   Adds macOS traffic lights support (Thank you https://github.com/fr-eed)
 
 ### Changed
 
@@ -22,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -   Artists and genres semantic scroll alignment is not always correct
 -   Multiple indexing issues (including unnecessary splitting of albums)
 -   Hanging of UI (white screen) at startup while loading persisted queue
+-   Missing newlines in lyrics
+-   Application close behaviour on macOS has been improved
+-   Double-clicked files are not being played in macOS
+-   Selecting "Open with" on multiple files only plays one file in Windows
 
 ## [3.0.0-preview.33] - 2024-09-03
 
